@@ -1,0 +1,41 @@
+name: Assign PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Assign Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          # List of reviewers
+          REVIEWERS=("andyportfolio" "Ghangseok" "workflowAndy")
+          
+          # Get the current PR number
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          
+          # Get the total number of PRs
+          TOTAL_PRS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls" | jq length)
+          
+          # Calculate the index of the reviewer to assign
+          REVIEWER_INDEX=$((TOTAL_PRS % ${#REVIEWERS[@]}))
+          
+          # Get the reviewer to assign
+          REVIEWER_TO_ASSIGN=${REVIEWERS[$REVIEWER_INDEX]}
+          
+          # Assign the reviewer
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
+            -d "{\"reviewers\":[\"$REVIEWER_TO_ASSIGN\"]}"
+          
+          echo "Assigned reviewer $REVIEWER_TO_ASSIGN to PR #$PR_NUMBER"
