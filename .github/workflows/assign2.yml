@@ -1,0 +1,58 @@
+name: Assign PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Assign Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          # Read the reviewer configuration
+          CONFIG=$(cat .github/reviewer-config.json)
+          
+          # Parse reviewers and their allocations
+          REVIEWERS=($(echo "$CONFIG" | jq -r '.reviewers[].username'))
+          ALLOCATIONS=($(echo "$CONFIG" | jq -r '.reviewers[].allocation'))
+          
+          # Calculate total allocation
+          TOTAL_ALLOCATION=0
+          for allocation in "${ALLOCATIONS[@]}"; do
+            TOTAL_ALLOCATION=$((TOTAL_ALLOCATION + allocation))
+          done
+          
+          # Get the current PR number
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          
+          # Get the total number of PRs
+          TOTAL_PRS=$(curl -s -H "Authorization: token $GITHUB_TOKEN" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls" | jq length)
+          
+          # Calculate the index of the reviewer to assign
+          INDEX=$((TOTAL_PRS % TOTAL_ALLOCATION))
+          
+          # Find the reviewer based on the calculated index
+          CURRENT_SUM=0
+          for i in "${!ALLOCATIONS[@]}"; do
+            CURRENT_SUM=$((CURRENT_SUM + ALLOCATIONS[i]))
+            if [ $INDEX -lt $CURRENT_SUM ]; then
+              REVIEWER_TO_ASSIGN=${REVIEWERS[i]}
+              break
+            fi
+          done
+          
+          # Assign the reviewer
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
+            -d "{\"reviewers\":[\"$REVIEWER_TO_ASSIGN\"]}"
+          
+          echo "Assigned reviewer $REVIEWER_TO_ASSIGN to PR #$PR_NUMBER"
