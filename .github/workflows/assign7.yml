@@ -1,0 +1,92 @@
+name: Assign PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Get last assigned reviewer
+        id: get_last_reviewer
+        run: |
+          LAST_REVIEWER=$(gh variable get LAST_ASSIGNED_REVIEWER || echo "")
+          echo "LAST_REVIEWER=$LAST_REVIEWER" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
+
+      - name: Assign Reviewer
+        id: assign_reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          CONFIG_FILE=.github/reviewer-config.json
+          
+          # Read the reviewer configuration
+          REVIEWERS=($(jq -r '.reviewers[]' $CONFIG_FILE))
+          
+          # Get the last assigned reviewer
+          LAST_REVIEWER="${{ steps.get_last_reviewer.outputs.LAST_REVIEWER }}"
+          
+          echo "Reviewers: ${REVIEWERS[*]}"
+          echo "PR Author: $PR_AUTHOR"
+          echo "Last Reviewer: $LAST_REVIEWER"
+          
+          # Find the next eligible reviewer
+          NEXT_REVIEWER=""
+          if [[ -z "$LAST_REVIEWER" ]]; then
+            echo "LAST_ASSIGNED_REVIEWER is empty, starting from the beginning"
+            for reviewer in "${REVIEWERS[@]}"; do
+              echo "Checking reviewer: $reviewer"
+              if [[ "$reviewer" != "$PR_AUTHOR" ]]; then
+                NEXT_REVIEWER="$reviewer"
+                echo "Selected first eligible reviewer: $NEXT_REVIEWER"
+                break
+              else
+                echo "Skipping $reviewer as they are the PR author"
+              fi
+            done
+          else
+            echo "Finding next reviewer after $LAST_REVIEWER"
+            for i in "${!REVIEWERS[@]}"; do
+              if [[ "${REVIEWERS[$i]}" == "$LAST_REVIEWER" ]]; then
+                for j in $(seq $(( (i+1) % ${#REVIEWERS[@]} )) $((${#REVIEWERS[@]}-1)) 0 $i); do
+                  echo "Checking reviewer: ${REVIEWERS[$j]}"
+                  if [[ "${REVIEWERS[$j]}" != "$PR_AUTHOR" ]]; then
+                    NEXT_REVIEWER="${REVIEWERS[$j]}"
+                    echo "Selected next eligible reviewer: $NEXT_REVIEWER"
+                    break 2
+                  else
+                    echo "Skipping ${REVIEWERS[$j]} as they are the PR author"
+                  fi
+                done
+              fi
+            done
+          fi
+          
+          # If still no reviewer found, assign the first reviewer from the list
+          if [[ -z "$NEXT_REVIEWER" ]]; then
+            NEXT_REVIEWER="${REVIEWERS[0]}"
+            echo "No eligible reviewer found. Defaulting to the first reviewer: $NEXT_REVIEWER"
+          fi
+          
+          # Get the current PR number
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          
+          # Assign the reviewer
+          gh pr edit $PR_NUMBER --add-reviewer $NEXT_REVIEWER
+          
+          echo "Assigned reviewer $NEXT_REVIEWER to PR #$PR_NUMBER"
+          echo "ASSIGNED_REVIEWER=$NEXT_REVIEWER" >> $GITHUB_OUTPUT
+
+      - name: Save assigned reviewer
+        if: steps.assign_reviewer.outputs.ASSIGNED_REVIEWER != ''
+        run: |
+          gh variable set LAST_ASSIGNED_REVIEWER --body ${{ steps.assign_reviewer.outputs.ASSIGNED_REVIEWER }}
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
