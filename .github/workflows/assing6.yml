@@ -87,6 +87,6 @@ jobs:
       - name: Save assigned reviewer
         if: steps.assign_reviewer.outputs.ASSIGNED_REVIEWER != ''
         run: |
-          gh variable set LAST_ASSIGNED_REVIEWER ${{ steps.assign_reviewer.outputs.ASSIGNED_REVIEWER }}
+          gh variable set LAST_ASSIGNED_REVIEWER --body ${{ steps.assign_reviewer.outputs.ASSIGNED_REVIEWER }}
         env:
           GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
