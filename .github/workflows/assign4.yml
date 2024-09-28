@@ -1,0 +1,82 @@
+name: Assign PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Assign Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          CONFIG_FILE=.github/reviewer-config.json
+          
+          # Read the reviewer configuration
+          CONFIG=$(cat $CONFIG_FILE)
+          
+          # Parse reviewers, their allocations, and current counts
+          REVIEWERS=($(echo "$CONFIG" | jq -r '.reviewers[].username'))
+          ALLOCATIONS=($(echo "$CONFIG" | jq -r '.reviewers[].allocation'))
+          CURRENT_COUNTS=($(echo "$CONFIG" | jq -r '.reviewers[].current_count'))
+          
+          echo "Current configuration:"
+          for i in "${!REVIEWERS[@]}"; do
+            echo "${REVIEWERS[$i]}: allocation ${ALLOCATIONS[$i]}, current count ${CURRENT_COUNTS[$i]}"
+          done
+          
+          # Find the reviewer with the lowest current_count relative to their allocation
+          MIN_RATIO=999999
+          SELECTED_INDEX=-1
+          for i in "${!REVIEWERS[@]}"; do
+            if [ "${ALLOCATIONS[$i]}" -eq 0 ]; then
+              echo "Skipping ${REVIEWERS[$i]} due to zero allocation"
+              continue
+            fi
+            RATIO=$(echo "scale=4; ${CURRENT_COUNTS[$i]} / ${ALLOCATIONS[$i]}" | bc)
+            echo "${REVIEWERS[$i]} ratio: $RATIO"
+            if (( $(echo "$RATIO < $MIN_RATIO" | bc -l) )); then
+              MIN_RATIO=$RATIO
+              SELECTED_INDEX=$i
+            fi
+          done
+          
+          if [ $SELECTED_INDEX -eq -1 ]; then
+            echo "Error: No eligible reviewer found. Check allocations."
+            exit 1
+          fi
+          
+          REVIEWER_TO_ASSIGN=${REVIEWERS[$SELECTED_INDEX]}
+          echo "Selected reviewer: $REVIEWER_TO_ASSIGN"
+          
+          # Increment the current_count for the selected reviewer
+          NEW_COUNT=$((CURRENT_COUNTS[SELECTED_INDEX] + 1))
+          
+          # Update the JSON file
+          jq --arg reviewer "$REVIEWER_TO_ASSIGN" --arg count "$NEW_COUNT" \
+            '.reviewers |= map(if .username == $reviewer then .current_count = ($count | tonumber) else . end)' \
+            $CONFIG_FILE > temp.json && mv temp.json $CONFIG_FILE
+          
+          # Get the current PR number
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          
+          # Assign the reviewer
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
+            -d "{\"reviewers\":[\"$REVIEWER_TO_ASSIGN\"]}"
+          
+          echo "Assigned reviewer $REVIEWER_TO_ASSIGN to PR #$PR_NUMBER"
+          
+          # Commit and push the updated config file
+          git config user.name "GitHub Action"
+          git config user.email "action@github.com"
+          git add $CONFIG_FILE
+          git commit -m "Update reviewer allocation counts [skip ci]"
+          git push
