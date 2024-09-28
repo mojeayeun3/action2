@@ -1,7 +1,3 @@
 {
-  "reviewers": [
-    {"username": "andyportfolio", "allocation": 3,"current_count": 0},
-    {"username": "Ghangseok", "allocation": 2,"current_count": 0},
-    {"username": "workflowAndy", "allocation": 1,"current_count": 0}
-  ]
+  "reviewers": ["andyportfolio", "Ghangseok", "workflowAndy"]
 }
