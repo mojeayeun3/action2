@@ -1,4 +1,4 @@
-name: Assign PR Reviewer12
+name: Assign PR Reviewer13
 
 on:
   pull_request:
@@ -52,40 +52,38 @@ jobs:
           echo "Last Reviewer: $LAST_REVIEWER"
           NEXT_REVIEWER=""
 
-         # Function to find the next reviewer
-	 find_next_reviewer() {
-	    local start_index=0
-	    local array_length=${#REVIEWERS[@]}
+            # Function to find the next reviewer
+            find_next_reviewer() {
+             local start_index=0
+             local array_length=${#REVIEWERS[@]}
 
-	    # If LAST_REVIEWER is not empty, find its index
-	    if [[ -n $LAST_REVIEWER ]]; then
-		for i in "${!REVIEWERS[@]}"; do
-		    if [[ "${REVIEWERS[i]}" = "${LAST_REVIEWER}" ]]; then
-			start_index=$((i + 1))
-			break
-		    fi
-		done
-	    fi
+             # If LAST_REVIEWER is not empty, find its index
+             if [[ -n $LAST_REVIEWER ]]; then
+               for i in "${!REVIEWERS[@]}"; do
+                 if [[ "${REVIEWERS[i]}" = "${LAST_REVIEWER}" ]]; then
+                    start_index=$((i + 1))
+                    break
+                 fi
+               done
+             fi
 
-	    # Loop through the array to find the next eligible reviewer
-	    for ((i=0; i<array_length; i++)); do
-		index=$(( (start_index + i) % array_length ))
-		if [[ "${REVIEWERS[index]}" != "${PR_AUTHOR}" ]]; then
-		    NEXT_REVIEWER="${REVIEWERS[index]}"
-		    break
-		fi
-	    done
+             # Loop through the array to find the next eligible reviewer
+             for ((i=0; i<array_length; i++)); do
+                index=$(( (start_index + i) % array_length ))
+                if [[ "${REVIEWERS[index]}" != "${PR_AUTHOR}" ]]; then
+                   NEXT_REVIEWER="${REVIEWERS[index]}"
+                   break
+                fi
+             done
 
-	    # If no eligible reviewer found, set to the first reviewer
-	    if [[ -z $NEXT_REVIEWER ]]; then
-		NEXT_REVIEWER="${REVIEWERS[0]}"
-	    fi
-	}
+             # If no eligible reviewer found, set to the first reviewer
+             if [[ -z $NEXT_REVIEWER ]]; then
+                NEXT_REVIEWER="${REVIEWERS[0]}"
+             fi
+          }
 
-	 # Call the function to find the next reviewer
-	 find_next_reviewer
-
-	 echo "Next Reviewer: $NEXT_REVIEWER"
+          # Call the function to find the next reviewer
+          find_next_reviewer
          
           # Get the current PR number
           PR_NUMBER=${{ github.event.pull_request.number }}
