@@ -1,0 +1,120 @@
+name: Assign PR Reviewer13
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 01_Checkout code
+        uses: actions/checkout@v2
+
+      - name: 02_Get reviewers
+        id: get_reviewers
+        run: |
+          REVIEWERS=$(gh variable get REVIEWERS || echo "")
+          echo "REVIEWERS=$REVIEWERS" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
+
+      - name: 03_Get last assigned reviewer
+        id: get_last_reviewer
+        run: |
+          LAST_REVIEWER=$(gh variable get LAST_ASSIGNED_REVIEWER || echo "")
+          echo "LAST_REVIEWER=$LAST_REVIEWER" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
+
+      - name: 04_Get sme
+        id: get_sme
+        run: |
+          SME=$(gh variable get SME || echo "")
+          echo "SME=$SME" >> $GITHUB_OUTPUT
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
+
+      - name: 05_Assign Reviewer
+        id: assign_reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+        run: |
+          # Get the last assigned reviewer
+          LAST_REVIEWER="${{ steps.get_last_reviewer.outputs.LAST_REVIEWER }}"
+          IFS=',' read -r -a REVIEWERS <<< "${{ steps.get_reviewers.outputs.REVIEWERS }}"
+          PR_AUTHOR="${{ env.PR_AUTHOR }}"
+          echo "Reviewers: ${REVIEWERS[*]}"
+          echo "SME: ${{ steps.get_sme.outputs.SME }}"
+          echo "PR Author: $PR_AUTHOR"
+          echo "Last Reviewer: $LAST_REVIEWER"
+          NEXT_REVIEWER=""
+            # Function to find the next reviewer
+            find_next_reviewer() {
+             local start_index=0
+             local array_length=${#REVIEWERS[@]}
+             # If LAST_REVIEWER is not empty, find its index
+             if [[ -n $LAST_REVIEWER ]]; then
+               for i in "${!REVIEWERS[@]}"; do
+                 if [[ "${REVIEWERS[i]}" = "${LAST_REVIEWER}" ]]; then
+                    start_index=$((i + 1))
+                    break
+                 fi
+               done
+             fi
+             # Loop through the array to find the next eligible reviewer
+             for ((i=0; i<array_length; i++)); do
+                index=$(( (start_index + i) % array_length ))
+                if [[ "${REVIEWERS[index]}" != "${PR_AUTHOR}" ]]; then
+                   NEXT_REVIEWER="${REVIEWERS[index]}"
+                   break
+                fi
+             done
+             # If no eligible reviewer found, set to the first reviewer
+             if [[ -z $NEXT_REVIEWER ]]; then
+                NEXT_REVIEWER="${REVIEWERS[0]}"
+             fi
+          }
+          # Call the function to find the next reviewer
+          find_next_reviewer
+         
+          # Get the current PR number
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          # Assign the reviewer
+          gh pr edit $PR_NUMBER --add-reviewer $NEXT_REVIEWER
+          echo "Assigned reviewer $NEXT_REVIEWER to PR #$PR_NUMBER"
+          echo "ASSIGNED_REVIEWER=$NEXT_REVIEWER" >> $GITHUB_OUTPUT
+      - name: 06_Determine SME to assign
+        id: determine-sme
+        run: |
+          PR_NUMBER=${{ github.event.pull_request.number }}
+          SME="${{ steps.get_sme.outputs.SME }}"
+          IFS=',' read -r -a SME_ARRAY <<< "$SME"
+          ASSIGNEE=""
+          if (( PR_NUMBER % 2 == 0 )); then
+            ASSIGNEE=${SME_ARRAY[1]}
+          else
+            ASSIGNEE=${SME_ARRAY[0]}
+          fi
+          # If PR_AUTHOR and ASSIGNEE are the same, assign a different SME
+          if [[ "$ASSIGNEE" == "$PR_AUTHOR" ]]; then
+            if (( PR_NUMBER % 2 == 0 )); then
+              ASSIGNEE=${SME_ARRAY[0]}
+            else
+              ASSIGNEE=${SME_ARRAY[1]}
+            fi
+          fi
+          echo "ASSIGNEE=$ASSIGNEE" >> $GITHUB_ENV
+          # Assign the SME
+          gh pr edit $PR_NUMBER --add-assignee $ASSIGNEE
+          
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
+
+      - name: 07_Save assigned reviewer
+        if: steps.assign_reviewer.outputs.ASSIGNED_REVIEWER != ''
+        run: |
+          gh variable set LAST_ASSIGNED_REVIEWER --body ${{ steps.assign_reviewer.outputs.ASSIGNED_REVIEWER }}
+        env:
+          GH_TOKEN: ${{ secrets.ACTION_TOKEN }}
