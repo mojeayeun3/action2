@@ -1,0 +1,60 @@
+name: Assign PR Reviewer
+
+on:
+  pull_request:
+    types: [opened, ready_for_review]
+
+jobs:
+  assign_reviewer:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Load last assigned index
+        id: last_index
+        uses: actions/cache@v2
+        with:
+          path: .github/last_assigned_index.txt
+          key: ${{ runner.os }}-last-assigned-index
+
+      - name: Assign Reviewer
+        env:
+          GITHUB_TOKEN: ${{ secrets.ACTION_TOKEN }}
+        run: |
+          CONFIG_FILE=.github/reviewer-config.json
+          INDEX_FILE=.github/last_assigned_index.txt
+          
+          # Read the reviewer configuration
+          REVIEWERS=($(jq -r '.reviewers[]' $CONFIG_FILE))
+          
+          # Get the last assigned index (or start at -1 if not set)
+          LAST_INDEX=$(<$INDEX_FILE)
+          LAST_INDEX=${LAST_INDEX:--1}
+          
+          # Calculate the next reviewer index
+          NEXT_INDEX=$(( (LAST_INDEX + 1) % ${#REVIEWERS[@]} ))
+          
+          # Get the reviewer to assign
+          REVIEWER_TO_ASSIGN=${REVIEWERS[$NEXT_INDEX]}
+          
+          # Save the new index
+          echo $NEXT_INDEX > $INDEX_FILE
+          
+          # Get the current PR number
+          PR_NUMBER=$(jq --raw-output .pull_request.number "$GITHUB_EVENT_PATH")
+          
+          # Assign the reviewer
+          curl -s -X POST \
+            -H "Authorization: token $GITHUB_TOKEN" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/requested_reviewers" \
+            -d "{\"reviewers\":[\"$REVIEWER_TO_ASSIGN\"]}"
+          
+          echo "Assigned reviewer $REVIEWER_TO_ASSIGN to PR #$PR_NUMBER"
+
+      - name: Save last assigned index
+        uses: actions/cache@v2
+        with:
+          path: .github/last_assigned_index.txt
+          key: ${{ runner.os }}-last-assigned-index
